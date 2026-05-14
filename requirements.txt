@@ -1,0 +1,6 @@
+Flask
+flask-cors
+mysql-connector-python
+argon2-cffi
+zxcvbn
+python-dotenv
