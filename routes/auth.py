@@ -1,16 +1,12 @@
 from flask import Blueprint, request, jsonify
 import hashlib
-from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError
 import mysql.connector
 
-# Import dari file lain yang baru kita buat
+# Import dari file lain
 from database import get_db_connection
 from utils import get_strength_label
 
-# Inisialisasi Blueprint untuk rute otentikasi
 auth_bp = Blueprint('auth', __name__)
-ph = PasswordHasher()
 
 @auth_bp.route('/register', methods=['POST'])
 def register():
@@ -26,10 +22,11 @@ def register():
     strength = get_strength_label(password)
     role = 'admin' if username.lower() == 'admin' else 'user'
 
+    # --- PERUBAHAN DI SINI (MD5 vs SHA-256) ---
     if method == 'MD5':
         password_hash = hashlib.md5(password.encode()).hexdigest()
-    elif method == 'Argon2':
-        password_hash = ph.hash(password)
+    elif method == 'SHA-256':
+        password_hash = hashlib.sha256(password.encode()).hexdigest()
     else:
         return jsonify({"message": "Metode hashing tidak valid!"}), 400
 
@@ -65,14 +62,14 @@ def login():
         return jsonify({"message": "Email tidak ditemukan!"}), 404
 
     is_valid = False
+    
+    # --- PERUBAHAN DI SINI (Proses Verifikasi) ---
     if user['hashing_method'] == 'MD5':
         input_hash = hashlib.md5(password.encode()).hexdigest()
         is_valid = (input_hash == user['password_hash'])
-    elif user['hashing_method'] == 'Argon2':
-        try:
-            is_valid = ph.verify(user['password_hash'], password)
-        except VerifyMismatchError:
-            is_valid = False
+    elif user['hashing_method'] == 'SHA-256':
+        input_hash = hashlib.sha256(password.encode()).hexdigest()
+        is_valid = (input_hash == user['password_hash'])
 
     if is_valid:
         return jsonify({
