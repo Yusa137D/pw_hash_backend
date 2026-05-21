@@ -4,3 +4,4 @@ mysql-connector-python
 zxcvbn
 python-dotenv
 reportlab
+gunicorn
