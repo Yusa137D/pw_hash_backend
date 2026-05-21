@@ -32,7 +32,8 @@ app.register_blueprint(auth_bp)
 app.register_blueprint(admin_bp)
 
 # 2. BARU AKTIFKAN CORS (Agar semua route di dalam Blueprint ikut diizinkan)
-CORS(app)
+# Mengizinkan semua origin, metode, dan headers secara eksplisit
+CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization"]}})
 
 @app.route('/export-pdf')
 def export_pdf():
