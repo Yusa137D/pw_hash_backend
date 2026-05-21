@@ -1,8 +1,9 @@
 from flask import Blueprint, request, jsonify
 import hashlib
 import mysql.connector
+import time
+import secrets
 
-# Import dari file lain
 from database import get_db_connection
 from utils import get_strength_label
 
@@ -22,20 +23,32 @@ def register():
     strength = get_strength_label(password)
     role = 'admin' if username.lower() == 'admin' else 'user'
 
-    # --- PERUBAHAN DI SINI (MD5 vs SHA-256) ---
+    # 1. GENERATE SALT (8 Karakter acak di belakang password)
+    salt = secrets.token_hex(4) 
+    salted_password = password + salt
+
+    # 2. HITUNG WAKTU PROSES HASHING
+    start_time = time.perf_counter()
+    
     if method == 'MD5':
-        password_hash = hashlib.md5(password.encode()).hexdigest()
+        password_hash = hashlib.md5(salted_password.encode()).hexdigest()
     elif method == 'SHA-256':
-        password_hash = hashlib.sha256(password.encode()).hexdigest()
+        password_hash = hashlib.sha256(salted_password.encode()).hexdigest()
     else:
         return jsonify({"message": "Metode hashing tidak valid!"}), 400
+        
+    end_time = time.perf_counter()
+    
+    # Durasi dalam milidetik (ms) dengan 4 angka di belakang koma
+    duration = (end_time - start_time) * 1000
+    hashing_duration = f"{duration:.4f} ms"
 
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        query = """INSERT INTO users (username, email, password_hash, hashing_method, role, password_strength) 
-                   VALUES (%s, %s, %s, %s, %s, %s)"""
-        cursor.execute(query, (username, email, password_hash, method, role, strength))
+        query = """INSERT INTO users (username, email, password_hash, hashing_method, role, password_strength, hashing_duration, password_salt) 
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"""
+        cursor.execute(query, (username, email, password_hash, method, role, strength, hashing_duration, salt))
         conn.commit()
         return jsonify({"message": "Registrasi berhasil!"}), 201
     except mysql.connector.IntegrityError:
@@ -61,14 +74,16 @@ def login():
     if not user:
         return jsonify({"message": "Email tidak ditemukan!"}), 404
 
+    # Ambil salt yang dulu disimpan saat register
+    salt = user['password_salt'] or ""
+    salted_input = password + salt
     is_valid = False
     
-    # --- PERUBAHAN DI SINI (Proses Verifikasi) ---
     if user['hashing_method'] == 'MD5':
-        input_hash = hashlib.md5(password.encode()).hexdigest()
+        input_hash = hashlib.md5(salted_input.encode()).hexdigest()
         is_valid = (input_hash == user['password_hash'])
     elif user['hashing_method'] == 'SHA-256':
-        input_hash = hashlib.sha256(password.encode()).hexdigest()
+        input_hash = hashlib.sha256(salted_input.encode()).hexdigest()
         is_valid = (input_hash == user['password_hash'])
 
     if is_valid:
