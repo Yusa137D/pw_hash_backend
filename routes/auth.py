@@ -9,8 +9,13 @@ from utils import get_strength_label
 
 auth_bp = Blueprint('auth', __name__)
 
-@auth_bp.route('/register', methods=['POST'])
+# PERBAIKAN: Tambahkan 'OPTIONS' ke dalam methods agar lolos preflight CORS browser
+@auth_bp.route('/register', methods=['POST', 'OPTIONS'])
 def register():
+    # Mengatasi preflight request secara manual di tingkat route
+    if request.method == 'OPTIONS':
+        return jsonify({"status": "ok"}), 200
+
     data = request.json
     username = data.get('username')
     email = data.get('email')
@@ -58,8 +63,12 @@ def register():
             cursor.close()
             conn.close()
 
-@auth_bp.route('/login', methods=['POST'])
+# PERBAIKAN: Tambahkan 'OPTIONS' ke dalam methods login juga
+@auth_bp.route('/login', methods=['POST', 'OPTIONS'])
 def login():
+    if request.method == 'OPTIONS':
+        return jsonify({"status": "ok"}), 200
+
     data = request.json
     email = data.get('email')
     password = data.get('password')
