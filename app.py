@@ -40,12 +40,14 @@ def export_pdf():
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
+    # TAMBAHAN: Masukkan password_hash_unsalted ke query
     cursor.execute("""
         SELECT username,
                email,
                hashing_method,
                password_strength,
-               password_hash
+               password_hash,
+               password_hash_unsalted 
         FROM users
     """)
 
@@ -196,27 +198,38 @@ def export_pdf():
     elements.append(user_title)
     elements.append(Spacer(1, 10))
 
+    # TAMBAHAN: Kolom 'Hash Murni' ditambahkan ke header tabel
     user_data = [[
         Paragraph("<b>No</b>", header_style),
         Paragraph("<b>Username</b>", header_style),
         Paragraph("<b>Email</b>", header_style),
         Paragraph("<b>Algoritma</b>", header_style),
         Paragraph("<b>Kekuatan</b>", header_style),
-        Paragraph("<b>Hash Password</b>", header_style),
+        Paragraph("<b>Hash Murni</b>", header_style),
+        Paragraph("<b>Hash (+Salt)</b>", header_style),
     ]]
 
     for index, u in enumerate(users, start=1):
-        hash_paragraph = Paragraph(u['password_hash'], hash_style)
+        # Handle data lama yang belum punya hash unsalted
+        unsalted_val = u.get('password_hash_unsalted') or 'Belum ada'
+        
+        hash_unsalted_paragraph = Paragraph(str(unsalted_val), hash_style)
+        hash_salted_paragraph = Paragraph(u['password_hash'], hash_style)
+        
         user_data.append([
             Paragraph(str(index), normal_style),
             Paragraph(u['username'], normal_style),
             Paragraph(u['email'], normal_style),
             Paragraph(u['hashing_method'], normal_style),
             Paragraph(u['password_strength'], normal_style),
-            hash_paragraph
+            hash_unsalted_paragraph, # Kolom baru
+            hash_salted_paragraph    # Kolom lama
         ])
 
-    user_table = Table(user_data, colWidths=[28, 70, 120, 65, 75, 170], repeatRows=1)
+    # PENYESUAIAN: Total lebar kertas Letter = ~562 point. 
+    # Lebar kolom dibagi rapi agar tidak luber keluar PDF tanpa merusak desain temanmu.
+    user_table = Table(user_data, colWidths=[20, 60, 90, 50, 50, 146, 146], repeatRows=1)
+    
     apply_navy_table_style(user_table)
     elements.append(user_table)
     elements.append(Spacer(1, 22))
