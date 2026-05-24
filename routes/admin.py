@@ -20,6 +20,7 @@ def get_all_users():
             role, 
             password_strength, 
             hashing_duration, 
+            hash_size,
             password_salt 
         FROM users
     """

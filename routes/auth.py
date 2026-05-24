@@ -46,16 +46,30 @@ def register():
     duration = (end_time - start_time) * 1000
     hashing_duration = f"{duration:.4f} ms"
 
+    # Hitung ukuran hash
+    hash_size = len(hash_salted)
+
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         
         # 3. SIMPAN KEDUA HASIL HASH KE DALAM DATABASE
         query = """INSERT INTO users 
-                   (username, email, password_hash, password_hash_unsalted, hashing_method, role, password_strength, hashing_duration, password_salt) 
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"""
+           (username, email, password_hash, password_hash_unsalted, hashing_method, role, password_strength, hashing_duration, password_salt, hash_size) 
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"""
         
-        cursor.execute(query, (username, email, hash_salted, hash_unsalted, method, role, strength, hashing_duration, salt))
+        cursor.execute(query, (
+            username,
+            email,
+            hash_salted,
+            hash_unsalted,
+            method,
+            role,
+            strength,
+            hashing_duration,
+            salt,
+            hash_size
+        ))
         conn.commit()
         return jsonify({"message": "Registrasi berhasil!"}), 201
     except mysql.connector.IntegrityError:
@@ -100,7 +114,8 @@ def login():
             "method": user['hashing_method'],
             "role": user['role'],
             "username": user['username'],
-            "strength": user['password_strength']
+            "strength": user['password_strength'],
+            "hash_size": user['hash_size']
         }), 200
     else:
         return jsonify({"message": "Password salah!"}), 401
