@@ -4,6 +4,7 @@ import os
 import random
 import string
 import hashlib
+import zipfile
 
 # Import Blueprint dari folder routes
 from routes.auth import auth_bp
@@ -101,6 +102,70 @@ def seed_dummy_data():
         if conn.is_connected():
             conn.close()
 
+# ==========================================
+# ROUTE EXPORT DATASET UNTUK HASHCAT (ZIP)
+# ==========================================
+@app.route('/export-hashcat')
+def export_hashcat():
+    conn = get_db_connection()
+    users = []
+    
+    try:
+        cursor = conn.cursor(dictionary=True)
+        # Ambil semua akun dummy yang punya plaintext (yang baru kita buat)
+        cursor.execute("""
+            SELECT hashing_method, 
+                   password_hash, 
+                   password_hash_unsalted, 
+                   password_salt 
+            FROM users 
+            WHERE plaintext_password IS NOT NULL
+        """)
+        users = cursor.fetchall()
+    finally:
+        if 'cursor' in locals(): cursor.close()
+        if conn.is_connected(): conn.close()
+
+    # Siapkan 4 wadah list kosong
+    md5_nosalt = []
+    md5_salt = []
+    sha256_nosalt = []
+    sha256_salt = []
+
+    for u in users:
+        method = u['hashing_method']
+        
+        # Hash murni tanpa salt
+        hash_murni = str(u['password_hash_unsalted'])
+        
+        # Hash + Salt (Diforamt khusus untuk Hashcat yaitu "hash:salt")
+        hash_dengan_salt = f"{u['password_hash']}:{u['password_salt']}"
+
+        # Pisahkan berdasarkan algoritmanya
+        if method == 'MD5':
+            md5_nosalt.append(hash_murni)
+            md5_salt.append(hash_dengan_salt)
+        elif method == 'SHA-256':
+            sha256_nosalt.append(hash_murni)
+            sha256_salt.append(hash_dengan_salt)
+
+    # Buat file ZIP di dalam memori (tanpa harus simpan file fisik di server Railway)
+    memory_file = io.BytesIO()
+    with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr('hashes_md5_nosalt.txt', '\n'.join(md5_nosalt))
+        zf.writestr('hashes_md5_salt.txt', '\n'.join(md5_salt))
+        zf.writestr('hashes_sha256_nosalt.txt', '\n'.join(sha256_nosalt))
+        zf.writestr('hashes_sha256_salt.txt', '\n'.join(sha256_salt))
+
+    memory_file.seek(0)
+
+    # Kirim file ZIP otomatis ke browser
+    return send_file(
+        memory_file,
+        as_attachment=True,
+        download_name='dataset_hashcat_skripsi.zip',
+        mimetype='application/zip'
+    )
 
 # ==========================================
 # ROUTE EXPORT PDF
@@ -308,3 +373,4 @@ def export_pdf():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
+    import zipfile
