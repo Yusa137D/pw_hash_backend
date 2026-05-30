@@ -54,7 +54,6 @@ def seed_dummy_data():
             return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
 
         for i in range(1, 101):
-            # Penentuan Kategori
             if i <= 40:
                 raw_password = random.choice(weak_pool)
                 strength_label = "Weak"
@@ -65,15 +64,12 @@ def seed_dummy_data():
                 raw_password = random.choice(strong_pool)
                 strength_label = "Very Strong" if "!" in raw_password else "Strong"
 
-            # Generate Data Dasar
             username = f"dummy_{i}_{generate_random_string()}"
             email = f"{username}@dummy.com"
             hashing_method = random.choice(['MD5', 'SHA-256'])
             
-            # Salt tepat 16 Karakter (sesuai panjang VARCHAR di HeidiSQL)
             salt_hex = os.urandom(8).hex()
 
-            # Hashing & Simulasi Metrik
             if hashing_method == 'MD5':
                 hash_unsalted = hashlib.md5(raw_password.encode()).hexdigest()
                 hash_salted = hashlib.md5((raw_password + salt_hex).encode()).hexdigest()
@@ -85,17 +81,17 @@ def seed_dummy_data():
                 hash_size = 64
                 duration = f"{random.uniform(1.1, 2.5):.4f} ms"
 
-            # Eksekusi Query (Kolom disesuaikan persis dengan HeidiSQL)
+            # PERBAIKAN: Menambahkan kolom plaintext_password ke dalam query
             query = """
                 INSERT INTO users 
-                (username, email, password_hash, password_hash_unsalted, hashing_method, role, password_strength, hashing_duration, password_salt, hash_size) 
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                (username, email, password_hash, password_hash_unsalted, hashing_method, role, password_strength, hashing_duration, password_salt, hash_size, plaintext_password) 
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
-            values = (username, email, hash_salted, hash_unsalted, hashing_method, 'user', strength_label, duration, salt_hex, hash_size)
+            values = (username, email, hash_salted, hash_unsalted, hashing_method, 'user', strength_label, duration, salt_hex, hash_size, raw_password)
             cursor.execute(query, values)
 
         conn.commit()
-        return "SUKSES BIKIN 100 AKUN! Cek UI Flutter-mu sekarang.", 200
+        return "SUKSES BIKIN 100 AKUN BESERTA PLAINTEXT! Cek UI Flutter-mu sekarang.", 200
 
     except Exception as e:
         return f"Terjadi kesalahan: {str(e)}", 500
@@ -116,9 +112,10 @@ def export_pdf():
     
     try:
         cursor = conn.cursor(dictionary=True)
+        # PERBAIKAN: Memanggil kolom plaintext_password
         cursor.execute("""
             SELECT username,
-                   email,
+                   plaintext_password,
                    hashing_method,
                    password_strength,
                    password_hash,
@@ -263,10 +260,11 @@ def export_pdf():
     elements.append(user_title)
     elements.append(Spacer(1, 10))
 
+    # PERBAIKAN: Kolom Email diganti dengan Password Asli di PDF
     user_data = [[
         Paragraph("<b>No</b>", header_style),
         Paragraph("<b>Username</b>", header_style),
-        Paragraph("<b>Email</b>", header_style),
+        Paragraph("<b>Pass Asli</b>", header_style),
         Paragraph("<b>Algoritma</b>", header_style),
         Paragraph("<b>Kekuatan</b>", header_style),
         Paragraph("<b>Hash Murni</b>", header_style),
@@ -275,6 +273,7 @@ def export_pdf():
 
     for index, u in enumerate(users, start=1):
         unsalted_val = u.get('password_hash_unsalted') or 'Belum ada'
+        pass_asli = u.get('plaintext_password') or '-'
         
         hash_unsalted_paragraph = Paragraph(str(unsalted_val), hash_style)
         hash_salted_paragraph = Paragraph(u['password_hash'], hash_style)
@@ -282,14 +281,15 @@ def export_pdf():
         user_data.append([
             Paragraph(str(index), normal_style),
             Paragraph(u['username'], normal_style),
-            Paragraph(u['email'], normal_style),
+            Paragraph(str(pass_asli), normal_style),
             Paragraph(u['hashing_method'], normal_style),
             Paragraph(u['password_strength'], normal_style),
             hash_unsalted_paragraph,
             hash_salted_paragraph 
         ])
 
-    user_table = Table(user_data, colWidths=[20, 60, 90, 50, 50, 146, 146], repeatRows=1)
+    # PERBAIKAN: Matematika lebar kolom PDF disesuaikan agar Pass Asli cukup ruang
+    user_table = Table(user_data, colWidths=[20, 50, 70, 50, 46, 163, 163], repeatRows=1)
     apply_navy_table_style(user_table)
     elements.append(user_table)
     elements.append(Spacer(1, 22))
@@ -302,7 +302,7 @@ def export_pdf():
 
     return send_file(
         buffer, as_attachment=True,
-        download_name='security_report.pdf', mimetype='application/pdf'
+        download_name='security_report_lengkap.pdf', mimetype='application/pdf'
     )
 
 if __name__ == '__main__':
