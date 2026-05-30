@@ -1,10 +1,6 @@
 from flask import Flask
 from flask_cors import CORS
 import os
-import random
-import string
-import hashlib
-import zipfile
 
 # Import Blueprint dari folder routes
 from routes.auth import auth_bp
@@ -38,148 +34,6 @@ app.register_blueprint(admin_bp)
 CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization"]}})
 
 # ==========================================
-# ROUTE RAHASIA UNTUK INJEKSI 100 DATA DUMMY
-# ==========================================
-@app.route('/seed-rahasia-100-akun', methods=['GET'])
-def seed_dummy_data():
-    conn = get_db_connection()
-    
-    try:
-        cursor = conn.cursor()
-        
-        # FITUR BARU: Hapus otomatis semua akun dummy lama sebelum bikin yang baru
-        # Ini mencegah datamu menumpuk jadi 200 atau 300 akun jika URL tertekan 2 kali.
-        cursor.execute("DELETE FROM users WHERE username LIKE 'dummy_%'")
-        conn.commit()
-
-        def generate_random_string(length=4):
-            return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
-
-        for i in range(1, 101):
-            # PERBAIKAN: Menambahkan angka iterasi 'i' ke dalam password
-            # Ini menjamin 100% setiap password berbeda satu sama lain!
-            if i <= 40:
-                bases = ['admin', 'password', 'qwerty', '123456', 'yusa']
-                raw_password = f"{random.choice(bases)}{i}"
-                strength_label = "Weak"
-            elif i <= 80:
-                bases = ['KucingTerbang', 'MadiunKota', 'BukuBiru', 'KopiPanas']
-                raw_password = f"{random.choice(bases)}{i}"
-                strength_label = "Fair"
-            else:
-                bases = ['Kopi.Pahit.Laptop!', 'Xy7!pQ9$mL4%', 'Keamanan.Skripsi!']
-                raw_password = f"{random.choice(bases)}Yusa{i}#"
-                strength_label = "Very Strong" if "!" in raw_password else "Strong"
-
-            # Generate Username, Email, & Hashing Method
-            username = f"dummy_{i}_{generate_random_string()}"
-            email = f"{username}@dummy.com"
-            hashing_method = random.choice(['MD5', 'SHA-256'])
-            
-            # Salt 16 Karakter
-            salt_hex = os.urandom(8).hex()
-
-            # Proses Enkripsi
-            if hashing_method == 'MD5':
-                hash_unsalted = hashlib.md5(raw_password.encode()).hexdigest()
-                hash_salted = hashlib.md5((raw_password + salt_hex).encode()).hexdigest()
-                hash_size = 32
-                duration = f"0.0{random.randint(10, 99)} ms"
-            else:
-                hash_unsalted = hashlib.sha256(raw_password.encode()).hexdigest()
-                hash_salted = hashlib.sha256((raw_password + salt_hex).encode()).hexdigest()
-                hash_size = 64
-                duration = f"{random.uniform(1.1, 2.5):.4f} ms"
-
-            # Simpan ke Database
-            query = """
-                INSERT INTO users 
-                (username, email, password_hash, password_hash_unsalted, hashing_method, role, password_strength, hashing_duration, password_salt, hash_size, plaintext_password) 
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """
-            values = (username, email, hash_salted, hash_unsalted, hashing_method, 'user', strength_label, duration, salt_hex, hash_size, raw_password)
-            cursor.execute(query, values)
-
-        conn.commit()
-        return "SUKSES RE-GENERATE! 100 Akun dengan 100 Password Unik berhasil dibuat.", 200
-
-    except Exception as e:
-        return f"Terjadi kesalahan: {str(e)}", 500
-    finally:
-        if 'cursor' in locals():
-            cursor.close()
-        if conn.is_connected():
-            conn.close()
-
-# ==========================================
-# ROUTE EXPORT DATASET UNTUK HASHCAT (ZIP)
-# ==========================================
-@app.route('/export-hashcat')
-def export_hashcat():
-    conn = get_db_connection()
-    users = []
-    
-    try:
-        cursor = conn.cursor(dictionary=True)
-        # PERBAIKAN: Jangan lupa panggil juga kolom plaintext_password di SELECT
-        cursor.execute("""
-            SELECT hashing_method, 
-                   password_hash, 
-                   password_hash_unsalted, 
-                   password_salt,
-                   plaintext_password 
-            FROM users 
-            WHERE plaintext_password IS NOT NULL
-        """)
-        users = cursor.fetchall()
-    finally:
-        if 'cursor' in locals(): cursor.close()
-        if conn.is_connected(): conn.close()
-
-    md5_nosalt = []
-    md5_salt = []
-    sha256_nosalt = []
-    sha256_salt = []
-    
-    # Wadah baru untuk wordlist (Menggunakan 'set' agar password tidak duplikat)
-    plaintexts = set() 
-
-    for u in users:
-        method = u['hashing_method']
-        hash_murni = str(u['password_hash_unsalted'])
-        hash_dengan_salt = f"{u['password_hash']}:{u['password_salt']}"
-        
-        # Masukkan password asli ke dalam set wordlist
-        if u['plaintext_password']:
-            plaintexts.add(str(u['plaintext_password']))
-
-        if method == 'MD5':
-            md5_nosalt.append(hash_murni)
-            md5_salt.append(hash_dengan_salt)
-        elif method == 'SHA-256':
-            sha256_nosalt.append(hash_murni)
-            sha256_salt.append(hash_dengan_salt)
-
-    memory_file = io.BytesIO()
-    with zipfile.ZipFile(memory_file, 'w', zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr('hashes_md5_nosalt.txt', '\n'.join(md5_nosalt))
-        zf.writestr('hashes_md5_salt.txt', '\n'.join(md5_salt))
-        zf.writestr('hashes_sha256_nosalt.txt', '\n'.join(sha256_nosalt))
-        zf.writestr('hashes_sha256_salt.txt', '\n'.join(sha256_salt))
-        
-        # Tambahkan file ke-5: Kamus Wordlist (Plaintext)
-        zf.writestr('kamus_wordlist.txt', '\n'.join(plaintexts))
-
-    memory_file.seek(0)
-
-    return send_file(
-        memory_file,
-        as_attachment=True,
-        download_name='dataset_hashcat_skripsi.zip',
-        mimetype='application/zip'
-    )
-
-# ==========================================
 # ROUTE EXPORT PDF
 # ==========================================
 @app.route('/export-pdf')
@@ -189,7 +43,6 @@ def export_pdf():
     
     try:
         cursor = conn.cursor(dictionary=True)
-        # PERBAIKAN: Memanggil kolom plaintext_password
         cursor.execute("""
             SELECT username,
                    plaintext_password,
@@ -201,6 +54,7 @@ def export_pdf():
         """)
         users = cursor.fetchall()
     finally:
+        # PENGAMANAN: Pastikan koneksi database selalu ditutup meski ada error
         if 'cursor' in locals():
             cursor.close()
         if conn.is_connected():
@@ -282,14 +136,17 @@ def export_pdf():
 
     elements = []
 
+    # TITLE
     title = Paragraph("<b>Laporan Keamanan Password (Sistem Analisis)</b>", title_style)
     elements.append(title)
     elements.append(Spacer(1, 10))
 
+    # INFO
     info = Paragraph(f"<b>Tanggal Cetak :</b> {datetime.now().strftime('%d %B %Y %H:%M:%S')}<br/><b>Jumlah Total Entri :</b> {total_users}", body_style)
     elements.append(info)
     elements.append(Spacer(1, 18))
 
+    # RINGKASAN
     summary_title = Paragraph("<b>Ringkasan Statistik Kontrol Kriptografi</b>", section_title_style)
     elements.append(summary_title)
 
@@ -304,6 +161,7 @@ def export_pdf():
     elements.append(summary_table)
     elements.append(Spacer(1, 20))
 
+    # DISTRIBUSI ALGORITMA
     algo_title = Paragraph("<b>Distribusi Algoritma Hashing</b>", section_title_style)
     elements.append(algo_title)
 
@@ -317,6 +175,7 @@ def export_pdf():
     elements.append(algo_table)
     elements.append(Spacer(1, 18))
 
+    # DISTRIBUSI STRENGTH
     strength_title = Paragraph("<b>Distribusi Kekuatan Password (zxcvbn)</b>", section_title_style)
     elements.append(strength_title)
 
@@ -333,11 +192,11 @@ def export_pdf():
     elements.append(strength_table)
     elements.append(PageBreak())
 
+    # DATA USER
     user_title = Paragraph("<b>Data Pengguna dan Informasi Keamanan Password</b>", section_title_style)
     elements.append(user_title)
     elements.append(Spacer(1, 10))
 
-    # PERBAIKAN: Kolom Email diganti dengan Password Asli di PDF
     user_data = [[
         Paragraph("<b>No</b>", header_style),
         Paragraph("<b>Username</b>", header_style),
@@ -365,15 +224,16 @@ def export_pdf():
             hash_salted_paragraph 
         ])
 
-    # PERBAIKAN: Matematika lebar kolom PDF disesuaikan agar Pass Asli cukup ruang
     user_table = Table(user_data, colWidths=[20, 50, 70, 50, 46, 163, 163], repeatRows=1)
     apply_navy_table_style(user_table)
     elements.append(user_table)
     elements.append(Spacer(1, 22))
 
+    # DISCLAIMER
     disclaimer = Paragraph("""<b>Disclaimer Analisis Keamanan:</b><br/>Laporan ini dihasilkan dari sistem analisis keamanan password lokal. Algoritma enkripsi MD5 tanpa garam (salt) secara teoritis rentan terhadap manipulasi berbasis tabel pelangi (Rainbow Table) dan serangan brute-force. Implementasi SHA-256 memberikan tingkat keamanan yang lebih tinggi terhadap serangan tersebut.""", body_style)
     elements.append(disclaimer)
 
+    # BUILD PDF
     doc.build(elements)
     buffer.seek(0)
 
@@ -385,4 +245,3 @@ def export_pdf():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
-    import zipfile
