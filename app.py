@@ -54,6 +54,7 @@ def seed_dummy_data():
             return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
 
         for i in range(1, 101):
+            # Penentuan Kategori
             if i <= 40:
                 raw_password = random.choice(weak_pool)
                 strength_label = "Weak"
@@ -62,30 +63,39 @@ def seed_dummy_data():
                 strength_label = "Fair"
             else:
                 raw_password = random.choice(strong_pool)
-                strength_label = "Strong"
+                strength_label = "Very Strong" if "!" in raw_password else "Strong"
 
-            username = f"user_dummy_{i}_{generate_random_string()}"
+            # Generate Data Dasar
+            username = f"dummy_{i}_{generate_random_string()}"
             email = f"{username}@dummy.com"
             hashing_method = random.choice(['MD5', 'SHA-256'])
-            salt = os.urandom(16).hex()
+            
+            # Salt tepat 16 Karakter (sesuai panjang VARCHAR di HeidiSQL)
+            salt_hex = os.urandom(8).hex()
 
+            # Hashing & Simulasi Metrik
             if hashing_method == 'MD5':
                 hash_unsalted = hashlib.md5(raw_password.encode()).hexdigest()
-                hash_salted = hashlib.md5((raw_password + salt).encode()).hexdigest()
+                hash_salted = hashlib.md5((raw_password + salt_hex).encode()).hexdigest()
+                hash_size = 32
+                duration = f"0.0{random.randint(10, 99)} ms"
             else:
                 hash_unsalted = hashlib.sha256(raw_password.encode()).hexdigest()
-                hash_salted = hashlib.sha256((raw_password + salt).encode()).hexdigest()
+                hash_salted = hashlib.sha256((raw_password + salt_hex).encode()).hexdigest()
+                hash_size = 64
+                duration = f"{random.uniform(1.1, 2.5):.4f} ms"
 
+            # Eksekusi Query (Kolom disesuaikan persis dengan HeidiSQL)
             query = """
                 INSERT INTO users 
-                (username, email, hashing_method, password_strength, password_hash, password_hash_unsalted, salt) 
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                (username, email, password_hash, password_hash_unsalted, hashing_method, role, password_strength, hashing_duration, password_salt, hash_size) 
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
-            values = (username, email, hashing_method, strength_label, hash_salted, hash_unsalted, salt)
+            values = (username, email, hash_salted, hash_unsalted, hashing_method, 'user', strength_label, duration, salt_hex, hash_size)
             cursor.execute(query, values)
 
         conn.commit()
-        return "SUKSES! 100 akun dummy (40 Weak, 40 Fair, 20 Strong) berhasil disuntikkan ke database Railway.", 200
+        return "SUKSES BIKIN 100 AKUN! Cek UI Flutter-mu sekarang.", 200
 
     except Exception as e:
         return f"Terjadi kesalahan: {str(e)}", 500
@@ -117,7 +127,6 @@ def export_pdf():
         """)
         users = cursor.fetchall()
     finally:
-        # PENGAMANAN: Pastikan koneksi database selalu ditutup meski ada error
         if 'cursor' in locals():
             cursor.close()
         if conn.is_connected():
