@@ -47,30 +47,39 @@ def seed_dummy_data():
     try:
         cursor = conn.cursor()
         
-        weak_pool = ['admin123', 'password', 'qwerty', '123456', 'yusaganteng']
-        fair_pool = ['KucingTerbang12', 'MadiunKota2026', 'BukuBiru99', 'KopiPanas123']
-        strong_pool = ['Kopi.Pahit.Laptop.Menyala!', 'Xy7!pQ9$mL4%kR2@wN8#', 'Keamanan.Skripsi.Yusa.2026!']
+        # FITUR BARU: Hapus otomatis semua akun dummy lama sebelum bikin yang baru
+        # Ini mencegah datamu menumpuk jadi 200 atau 300 akun jika URL tertekan 2 kali.
+        cursor.execute("DELETE FROM users WHERE username LIKE 'dummy_%'")
+        conn.commit()
 
         def generate_random_string(length=4):
             return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
 
         for i in range(1, 101):
+            # PERBAIKAN: Menambahkan angka iterasi 'i' ke dalam password
+            # Ini menjamin 100% setiap password berbeda satu sama lain!
             if i <= 40:
-                raw_password = random.choice(weak_pool)
+                bases = ['admin', 'password', 'qwerty', '123456', 'yusa']
+                raw_password = f"{random.choice(bases)}{i}"
                 strength_label = "Weak"
             elif i <= 80:
-                raw_password = random.choice(fair_pool)
+                bases = ['KucingTerbang', 'MadiunKota', 'BukuBiru', 'KopiPanas']
+                raw_password = f"{random.choice(bases)}{i}"
                 strength_label = "Fair"
             else:
-                raw_password = random.choice(strong_pool)
+                bases = ['Kopi.Pahit.Laptop!', 'Xy7!pQ9$mL4%', 'Keamanan.Skripsi!']
+                raw_password = f"{random.choice(bases)}Yusa{i}#"
                 strength_label = "Very Strong" if "!" in raw_password else "Strong"
 
+            # Generate Username, Email, & Hashing Method
             username = f"dummy_{i}_{generate_random_string()}"
             email = f"{username}@dummy.com"
             hashing_method = random.choice(['MD5', 'SHA-256'])
             
+            # Salt 16 Karakter
             salt_hex = os.urandom(8).hex()
 
+            # Proses Enkripsi
             if hashing_method == 'MD5':
                 hash_unsalted = hashlib.md5(raw_password.encode()).hexdigest()
                 hash_salted = hashlib.md5((raw_password + salt_hex).encode()).hexdigest()
@@ -82,7 +91,7 @@ def seed_dummy_data():
                 hash_size = 64
                 duration = f"{random.uniform(1.1, 2.5):.4f} ms"
 
-            # PERBAIKAN: Menambahkan kolom plaintext_password ke dalam query
+            # Simpan ke Database
             query = """
                 INSERT INTO users 
                 (username, email, password_hash, password_hash_unsalted, hashing_method, role, password_strength, hashing_duration, password_salt, hash_size, plaintext_password) 
@@ -92,7 +101,7 @@ def seed_dummy_data():
             cursor.execute(query, values)
 
         conn.commit()
-        return "SUKSES BIKIN 100 AKUN BESERTA PLAINTEXT! Cek UI Flutter-mu sekarang.", 200
+        return "SUKSES RE-GENERATE! 100 Akun dengan 100 Password Unik berhasil dibuat.", 200
 
     except Exception as e:
         return f"Terjadi kesalahan: {str(e)}", 500
