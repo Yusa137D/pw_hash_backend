@@ -1,7 +1,9 @@
 from flask import Flask
-from flask_cors import CORS  # Pastikan ini di-import
-from config import Config
-import os  # TAMBAHKAN INI untuk membaca Port Railway
+from flask_cors import CORS
+import os
+import random
+import string
+import hashlib
 
 # Import Blueprint dari folder routes
 from routes.auth import auth_bp
@@ -31,33 +33,96 @@ app = Flask(__name__)
 app.register_blueprint(auth_bp)
 app.register_blueprint(admin_bp)
 
-# 2. BARU AKTIFKAN CORS (Agar semua route di dalam Blueprint ikut diizinkan)
-# Mengizinkan semua origin, metode, dan headers secara eksplisit
+# 2. AKTIFKAN CORS
 CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"], "allow_headers": ["Content-Type", "Authorization"]}})
 
+# ==========================================
+# ROUTE RAHASIA UNTUK INJEKSI 100 DATA DUMMY
+# ==========================================
+@app.route('/seed-rahasia-100-akun', methods=['GET'])
+def seed_dummy_data():
+    conn = get_db_connection()
+    
+    try:
+        cursor = conn.cursor()
+        
+        weak_pool = ['admin123', 'password', 'qwerty', '123456', 'yusaganteng']
+        fair_pool = ['KucingTerbang12', 'MadiunKota2026', 'BukuBiru99', 'KopiPanas123']
+        strong_pool = ['Kopi.Pahit.Laptop.Menyala!', 'Xy7!pQ9$mL4%kR2@wN8#', 'Keamanan.Skripsi.Yusa.2026!']
+
+        def generate_random_string(length=4):
+            return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
+
+        for i in range(1, 101):
+            if i <= 40:
+                raw_password = random.choice(weak_pool)
+                strength_label = "Weak"
+            elif i <= 80:
+                raw_password = random.choice(fair_pool)
+                strength_label = "Fair"
+            else:
+                raw_password = random.choice(strong_pool)
+                strength_label = "Strong"
+
+            username = f"user_dummy_{i}_{generate_random_string()}"
+            email = f"{username}@dummy.com"
+            hashing_method = random.choice(['MD5', 'SHA-256'])
+            salt = os.urandom(16).hex()
+
+            if hashing_method == 'MD5':
+                hash_unsalted = hashlib.md5(raw_password.encode()).hexdigest()
+                hash_salted = hashlib.md5((raw_password + salt).encode()).hexdigest()
+            else:
+                hash_unsalted = hashlib.sha256(raw_password.encode()).hexdigest()
+                hash_salted = hashlib.sha256((raw_password + salt).encode()).hexdigest()
+
+            query = """
+                INSERT INTO users 
+                (username, email, hashing_method, password_strength, password_hash, password_hash_unsalted, salt) 
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """
+            values = (username, email, hashing_method, strength_label, hash_salted, hash_unsalted, salt)
+            cursor.execute(query, values)
+
+        conn.commit()
+        return "SUKSES! 100 akun dummy (40 Weak, 40 Fair, 20 Strong) berhasil disuntikkan ke database Railway.", 200
+
+    except Exception as e:
+        return f"Terjadi kesalahan: {str(e)}", 500
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if conn.is_connected():
+            conn.close()
+
+
+# ==========================================
+# ROUTE EXPORT PDF
+# ==========================================
 @app.route('/export-pdf')
 def export_pdf():
     conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
+    users = []
+    
+    try:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT username,
+                   email,
+                   hashing_method,
+                   password_strength,
+                   password_hash,
+                   password_hash_unsalted 
+            FROM users
+        """)
+        users = cursor.fetchall()
+    finally:
+        # PENGAMANAN: Pastikan koneksi database selalu ditutup meski ada error
+        if 'cursor' in locals():
+            cursor.close()
+        if conn.is_connected():
+            conn.close()
 
-    # TAMBAHAN: Masukkan password_hash_unsalted ke query
-    cursor.execute("""
-        SELECT username,
-               email,
-               hashing_method,
-               password_strength,
-               password_hash,
-               password_hash_unsalted 
-        FROM users
-    """)
-
-    users = cursor.fetchall()
-    cursor.close()
-    conn.close()
-
-    # =========================
-    # HITUNG STATISTIK
-    # =========================
     total_users = len(users)
     md5_count = len([u for u in users if u['hashing_method'] == 'MD5'])
     sha_count = len([u for u in users if u['hashing_method'] == 'SHA-256'])
@@ -71,9 +136,6 @@ def export_pdf():
         if strength in strength_stats:
             strength_stats[strength] += 1
 
-    # =========================
-    # PDF GENERATION
-    # =========================
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer, pagesize=letter,
@@ -137,17 +199,14 @@ def export_pdf():
 
     elements = []
 
-    # TITLE
     title = Paragraph("<b>Laporan Keamanan Password (Sistem Analisis)</b>", title_style)
     elements.append(title)
     elements.append(Spacer(1, 10))
 
-    # INFO
     info = Paragraph(f"<b>Tanggal Cetak :</b> {datetime.now().strftime('%d %B %Y %H:%M:%S')}<br/><b>Jumlah Total Entri :</b> {total_users}", body_style)
     elements.append(info)
     elements.append(Spacer(1, 18))
 
-    # RINGKASAN
     summary_title = Paragraph("<b>Ringkasan Statistik Kontrol Kriptografi</b>", section_title_style)
     elements.append(summary_title)
 
@@ -162,7 +221,6 @@ def export_pdf():
     elements.append(summary_table)
     elements.append(Spacer(1, 20))
 
-    # DISTRIBUSI ALGORITMA
     algo_title = Paragraph("<b>Distribusi Algoritma Hashing</b>", section_title_style)
     elements.append(algo_title)
 
@@ -176,7 +234,6 @@ def export_pdf():
     elements.append(algo_table)
     elements.append(Spacer(1, 18))
 
-    # DISTRIBUSI STRENGTH
     strength_title = Paragraph("<b>Distribusi Kekuatan Password (zxcvbn)</b>", section_title_style)
     elements.append(strength_title)
 
@@ -193,12 +250,10 @@ def export_pdf():
     elements.append(strength_table)
     elements.append(PageBreak())
 
-    # DATA USER
     user_title = Paragraph("<b>Data Pengguna dan Informasi Keamanan Password</b>", section_title_style)
     elements.append(user_title)
     elements.append(Spacer(1, 10))
 
-    # TAMBAHAN: Kolom 'Hash Murni' ditambahkan ke header tabel
     user_data = [[
         Paragraph("<b>No</b>", header_style),
         Paragraph("<b>Username</b>", header_style),
@@ -210,7 +265,6 @@ def export_pdf():
     ]]
 
     for index, u in enumerate(users, start=1):
-        # Handle data lama yang belum punya hash unsalted
         unsalted_val = u.get('password_hash_unsalted') or 'Belum ada'
         
         hash_unsalted_paragraph = Paragraph(str(unsalted_val), hash_style)
@@ -222,23 +276,18 @@ def export_pdf():
             Paragraph(u['email'], normal_style),
             Paragraph(u['hashing_method'], normal_style),
             Paragraph(u['password_strength'], normal_style),
-            hash_unsalted_paragraph, # Kolom baru
-            hash_salted_paragraph    # Kolom lama
+            hash_unsalted_paragraph,
+            hash_salted_paragraph 
         ])
 
-    # PENYESUAIAN: Total lebar kertas Letter = ~562 point. 
-    # Lebar kolom dibagi rapi agar tidak luber keluar PDF tanpa merusak desain temanmu.
     user_table = Table(user_data, colWidths=[20, 60, 90, 50, 50, 146, 146], repeatRows=1)
-    
     apply_navy_table_style(user_table)
     elements.append(user_table)
     elements.append(Spacer(1, 22))
 
-    # DISCLAIMER
     disclaimer = Paragraph("""<b>Disclaimer Analisis Keamanan:</b><br/>Laporan ini dihasilkan dari sistem analisis keamanan password lokal. Algoritma enkripsi MD5 tanpa garam (salt) secara teoritis rentan terhadap manipulasi berbasis tabel pelangi (Rainbow Table) dan serangan brute-force. Implementasi SHA-256 memberikan tingkat keamanan yang lebih tinggi terhadap serangan tersebut.""", body_style)
     elements.append(disclaimer)
 
-    # BUILD PDF
     doc.build(elements)
     buffer.seek(0)
 
@@ -248,6 +297,5 @@ def export_pdf():
     )
 
 if __name__ == '__main__':
-    # PERBAIKAN UTAMA: Menggunakan port dinamis dari sistem Railway, host '0.0.0.0' wajib ada!
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
